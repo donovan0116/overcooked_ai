@@ -176,3 +176,4 @@ node_modules/
 
 # Ignore copied overcooked_ai directory in server
 src/overcooked_demo/server/overcooked_ai/
+src/IB_ToM/ppo_algo/logs/

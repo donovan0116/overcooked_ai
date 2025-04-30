@@ -7,7 +7,7 @@ import random
 import torch
 
 from IB_ToM.utils.utils import ParameterManager, env_maker, print_generation_banner
-from IB_ToM.utils.utils import ReplayBuffer, overcooked_obs_process
+from IB_ToM.utils.utils import ReplayBuffer, overcooked_obs_process, evaluate_policy, build_eval_agent
 from ppo import PPOAgent, batch_generator, collect_samples, get_run_log_dir, Normalization
 from torch.utils.tensorboard import SummaryWriter
 
@@ -111,13 +111,6 @@ def random_choice(
 
     raise ValueError(f"random_choice: 未知 strategy='{strategy}'")
 
-
-@torch.no_grad()
-def evaluate_policy(env, agent_ego, agent_partner, eval_times, state_norm):
-
-    pass
-
-
 def main():
     config = {
         'lr_actor': 3e-4,
@@ -147,13 +140,14 @@ def main():
     agent_ego = PPOAgent(state_dim, action_dim, 128, config)
     agent_partner = PPOAgent(state_dim, action_dim, 128, config)
     agent_pop = [agent_partner]
+    zsc_agent = build_eval_agent(env, "Random")
 
     buffer = ReplayBuffer()
 
     generation = 0
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_5', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_6', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
@@ -162,6 +156,7 @@ def main():
 
         total_timesteps = 0
         all_episode_rewards = []
+        all_episode_rewards_eval = []
 
         while total_timesteps < param.get("max_timesteps"):
             partner = random_choice(agent_pop + [agent_ego])
@@ -170,11 +165,16 @@ def main():
             all_episode_rewards.extend(episode_rewards)
 
             train(agent_ego, buffer, writer, total_timesteps)
+            # todo: change partner in eval to a human policy as zero_shot
+            episode_rewards_eval = evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm)
+            all_episode_rewards_eval.extend(episode_rewards_eval)
 
-            if len(all_episode_rewards) >= 10:
+            if len(all_episode_rewards) >= 10 and len(all_episode_rewards_eval) >= 10:
                 avg_reward = np.mean(all_episode_rewards[-10:])
                 print(f"Total Timesteps: {total_timesteps}, Average Reward (last 10 episodes): {avg_reward:.2f}")
                 writer.add_scalar("Reward/avg_last10", avg_reward, total_timesteps)
+                avg_reward_eval = np.mean(all_episode_rewards_eval[-10:])
+                writer.add_scalar("Reward/eval", avg_reward_eval, total_timesteps)
                 if avg_reward > 135:
                     break
         if np.mean(all_episode_rewards[-10:]) < 1e-2:

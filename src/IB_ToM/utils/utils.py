@@ -14,6 +14,8 @@ import gymnasium
 
 import numpy as np
 
+import torch
+
 def env_maker(env_name="Overcooked-v0", layout_name="cramped_room"):
     base_mdp = OvercookedGridworld.from_layout_name(layout_name)
     base_env = OvercookedEnv.from_mdp(base_mdp, **DEFAULT_ENV_PARAMS, info_level=0)
@@ -85,3 +87,43 @@ class ReplayBuffer:
                 np.array(self.next_states),
                 np.array(self.dones),
                 np.array(self.log_probs))
+
+@torch.no_grad()
+def evaluate_policy(env, agent_ego, partner, steps, state_norm):
+    episode_rewards = []
+    state = env.reset()
+    obs_ego, obs_partner = overcooked_obs_process(state)
+    obs_ego = state_norm(obs_ego)
+    obs_partner = state_norm(obs_partner)
+    done = False
+    ep_reward = 0
+    for _ in range(steps):
+        action_ego, log_prob_ego = agent_ego.select_action(obs_ego)
+        action_partner, _ = partner.select_action(obs_partner)
+        next_state, reward, done, _ = env.step([action_ego, action_partner])
+        next_obs_ego, next_obs_partner = overcooked_obs_process(next_state)
+        next_obs_ego = state_norm(next_obs_ego)
+        next_obs_partner = state_norm(next_obs_partner)
+        ep_reward += reward
+        obs_ego = next_obs_ego
+        obs_partner = next_obs_partner
+        if done:
+            state = env.reset()
+            obs_ego, obs_partner = overcooked_obs_process(state)
+            obs_ego = state_norm(obs_ego)
+            obs_partner = state_norm(obs_partner)
+            done = False
+            episode_rewards.append(ep_reward)
+            ep_reward = 0
+    return episode_rewards
+
+def build_eval_agent(env, eval_agent_choice="Random"):
+    if eval_agent_choice == "Random":
+        from src.IB_ToM.ppo_algo.agents import RandomAgent
+        return RandomAgent(env)
+    elif eval_agent_choice == "Human":
+        from src.IB_ToM.ppo_algo.agents import HumanAgent
+        return HumanAgent()
+    else:
+        raise ValueError("Invalid eval_agent_choice")
+

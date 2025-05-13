@@ -1,4 +1,3 @@
-import gym
 import numpy as np
 import psutil
 import torch
@@ -7,6 +6,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from click.core import batch
 
+from IB_ToM.utils.utils import overcooked_obs_process
 
 MAX_DATASET_NUM = 3200
 
@@ -80,8 +80,8 @@ def train_step1(model_, dataset, batch_size=32, epoch=10, recon_loss_fn=None, op
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        if i % 10 == 0:
-            print("[Training 1] epoch:{}, loss: {}".format(i, loss.item()))
+        # if i % 10 == 0:
+        #     print("[Training 1] epoch:{}, loss: {}".format(i, loss.item()))
         if loss.item() < 0.0015:
             # 防止过拟合
             return
@@ -110,8 +110,8 @@ def train_step2(model_, dataset, batch_size=32, epoch=10, optimizer=None):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        if i % 10 == 0:
-            print("[Training 2] epoch:{}, loss: {}".format(i, loss.item()))
+        # if i % 10 == 0:
+        #     print("[Training 2] epoch:{}, loss: {}".format(i, loss.item()))
 
 
 # compute the cosine metrix C
@@ -137,7 +137,8 @@ def make_fake_dataset(env, data_num, seq_len, device='cuda'):
     sequences = []
 
     for i in range(data_num):
-        state, reward, done, *_ = env.step(act)
+        state, reward, done, *_ = env.step([act, act])
+        _, state = overcooked_obs_process(state)
 
         # Handle different state formats
         if isinstance(state, list):
@@ -201,6 +202,10 @@ def pre_process_dataset(dataset, batch_size):
         dataset = dataset[-MAX_DATASET_NUM:]
 
     return dataset
+
+def train_tom_model(tom_model, dataset, param):
+    train_step1(tom_model, dataset, 64, 100)
+    train_step2(tom_model, dataset, 64, 100)
 
 
 if __name__ == '__main__':

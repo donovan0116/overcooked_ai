@@ -27,6 +27,27 @@ class Actor(nn.Module):
        probs = F.softmax(logits, dim=-1)
        return probs
 
+class ToMActor(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, tom_input_size, tom_hidden_size):
+        super(ToMActor, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.tom_fc = nn.Linear(tom_input_size, tom_hidden_size)
+        self.out = nn.Linear(hidden_size + tom_hidden_size, output_size)
+        self.tanh = nn.Tanh()
+        orthogonal_init(self.fc1)
+        orthogonal_init(self.fc2)
+        orthogonal_init(self.out)
+        orthogonal_init(self.tom_fc)
+
+    def forward(self, x, x_tom):
+       x_tom = self.tanh(self.tom_fc(x_tom))
+       x = self.tanh(self.fc1(x))
+       x = self.tanh(self.fc2(x))
+       logits = self.out(torch.concat([x, x_tom], dim=-1))
+       probs = F.softmax(logits, dim=-1)
+       return probs
+
 class Critic(nn.Module):
     def __init__(self, input_size, hidden_size):
         super(Critic, self).__init__()

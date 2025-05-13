@@ -6,22 +6,24 @@ import numpy as np
 import random
 
 import torch
+from torch.onnx.symbolic_opset11 import insert
 
-from IB_ToM.utils.utils import ParameterManager, env_maker, print_generation_banner, one_rollout
+from IB_ToM.tom_net import ToMNet, make_fake_dataset, train_step1, train_step2, insert_dataset, train_tom_model
+from IB_ToM.utils.utils import ParameterManager, env_maker, print_generation_banner, tom_one_rollout, \
+    tom_evaluate_policy
 from IB_ToM.utils.utils import ReplayBuffer, overcooked_obs_process, evaluate_policy, build_eval_agent
-from agents import PPOAgent
+from agents import PPOAgent, ToMPPOAgent
 from ppo import collect_samples, get_run_log_dir, Normalization
 from torch.utils.tensorboard import SummaryWriter
 
-def op_train(agent, buffer, writer, global_step):
-    actor_loss, critic_loss = agent.update(buffer)
+def tom_op_train(agent, buffer, writer, global_step, tom_model):
+    actor_loss, critic_loss = agent.update(buffer, tom_model)
     writer.add_scalar('Loss/Actor', actor_loss, global_step)
     writer.add_scalar('Loss/Critic', critic_loss, global_step)
     return actor_loss, critic_loss
 
 
-
-def sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm):
+def tom_sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, tom_model, dataset):
     """
     Collect samples for self-play training.
 
@@ -44,10 +46,26 @@ def sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_
     obs_partner = state_norm(obs_partner)
     done = False
     ep_reward = 0
+    dataset_item = []
     while steps < batch_size:
-        next_obs_ego, next_obs_partner, reward, done, one_traj = one_rollout(
-            env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner)
+        # todo: '32' needed to be replaced by param
+        tom_latent, _ = tom_model(dataset[0:32, :, :])
+        next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj = tom_one_rollout(
+            env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0))
         buffer.push(*one_traj)
+        dataset_item.append(
+            torch.concat(
+                [
+                    torch.FloatTensor(obs_partner),
+                    torch.FloatTensor([action_partner])
+                ]
+            )
+        )
+        # todo: '2' needed to be replaced by seq_len param
+        if len(dataset_item) == 2:
+            dataset = insert_dataset(dataset, dataset_item)
+            dataset_item = []
+
         ep_reward += reward
         obs_ego = next_obs_ego
         obs_partner = next_obs_partner
@@ -129,6 +147,8 @@ def main():
         'tom_hidden_size': 64,
         'continuous': False,
         'target_reward': 200,
+        # tom hyper param
+        'seq_len': 2,
     }
     param = ParameterManager(config)
 
@@ -139,7 +159,7 @@ def main():
     action_dim = env.action_space.n
 
     state_norm = Normalization(state_dim)
-    agent_ego = PPOAgent(state_dim, action_dim, 128, config)
+    agent_ego = ToMPPOAgent(state_dim, action_dim, 128, config)
     agent_partner = deepcopy(agent_ego)
     agent_pop = []
     zsc_agent = build_eval_agent(env, "Random")
@@ -148,8 +168,18 @@ def main():
 
     generation = 0
 
+    # build tom model and do the initial training
+    tom_model = ToMNet(input_size=state_dim + 1,
+                       hidden_size=[64, 256, state_dim + 1],
+                       output_size=(state_dim + 1) * param.get("seq_len")).to('cuda')
+
+    fake_dataset = make_fake_dataset(env, param.get("mini_batch_size") * 10, param.get("seq_len"))
+    train_step1(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
+    train_step2(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
+    dataset = fake_dataset
+
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_4', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_3', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
@@ -162,14 +192,19 @@ def main():
 
         while total_timesteps < param.get("max_timesteps"):
             partner = random_choice(agent_pop + [agent_partner])
-            steps, episode_rewards = sp_collect_samples(env, agent_ego, partner, buffer, param.get("batch_size"), state_norm)
+            steps, episode_rewards = tom_sp_collect_samples(
+                env, agent_ego, partner, buffer,
+                param.get("batch_size"), state_norm, tom_model, dataset)
             total_timesteps += steps
             all_episode_rewards.extend(episode_rewards)
 
-            op_train(agent_ego, buffer, writer, total_timesteps)
+            tom_op_train(agent_ego, buffer, writer, total_timesteps, tom_model)
             agent_partner = deepcopy(agent_ego)
+            # todo: finish train tom model
+            train_tom_model(tom_model, dataset, param)
             # todo: change partner in eval to a human policy as zero_shot
-            episode_rewards_eval = evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm)
+            episode_rewards_eval = tom_evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm,
+                                                       tom_model, dataset)
             all_episode_rewards_eval.extend(episode_rewards_eval)
 
             if len(all_episode_rewards) >= 10 and len(all_episode_rewards_eval) >= 10:
@@ -184,9 +219,9 @@ def main():
             print("training finished early")
             break
 
-        agent_pop.append(deepcopy(agent_ego))
-        agent_ego = PPOAgent(state_dim, action_dim, 128, config)
-        agent_partner  = deepcopy(agent_ego)
+        agent_pop.append(agent_ego)
+        agent_ego = ToMPPOAgent(state_dim, action_dim, 128, config)
+        agent_partner = deepcopy(agent_ego)
 
         if generation > 10:
             print("training finished")

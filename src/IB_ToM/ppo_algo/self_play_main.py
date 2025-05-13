@@ -1,4 +1,5 @@
 from collections import deque
+from copy import deepcopy
 from typing import List, Any
 
 import numpy as np
@@ -6,9 +7,10 @@ import random
 
 import torch
 
-from IB_ToM.utils.utils import ParameterManager, env_maker, print_generation_banner
+from IB_ToM.utils.utils import ParameterManager, env_maker, print_generation_banner, one_rollout
 from IB_ToM.utils.utils import ReplayBuffer, overcooked_obs_process, evaluate_policy, build_eval_agent
-from ppo import PPOAgent, batch_generator, collect_samples, get_run_log_dir, Normalization
+from agents import PPOAgent
+from ppo import collect_samples, get_run_log_dir, Normalization
 from torch.utils.tensorboard import SummaryWriter
 
 def train(agent, buffer, writer, global_step):
@@ -16,6 +18,8 @@ def train(agent, buffer, writer, global_step):
     writer.add_scalar('Loss/Actor', actor_loss, global_step)
     writer.add_scalar('Loss/Critic', critic_loss, global_step)
     return actor_loss, critic_loss
+
+
 
 def sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm):
     """
@@ -41,18 +45,13 @@ def sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_
     done = False
     ep_reward = 0
     while steps < batch_size:
-        action_ego, log_prob_ego = agent_ego.select_action(obs_ego)
-        action_partner, log_prob_partner = agent_partner.select_action(obs_partner)
-        next_state, reward, done, _ = env.step([action_ego, action_partner])
-
-        next_obs_ego, next_obs_partner = overcooked_obs_process(next_state)
-        next_obs_ego = state_norm(next_obs_ego)
-        next_obs_partner = state_norm(next_obs_partner)
-        steps += 1
+        next_obs_ego, next_obs_partner, reward, done, one_traj = one_rollout(
+            env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner)
+        buffer.push(*one_traj)
         ep_reward += reward
-        buffer.push(obs_ego, action_ego, reward, next_obs_ego, done, log_prob_ego)
         obs_ego = next_obs_ego
         obs_partner = next_obs_partner
+        steps += 1
         if done:
             state = env.reset()
             obs_ego, obs_partner = overcooked_obs_process(state)
@@ -62,54 +61,6 @@ def sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_
             episode_rewards.append(ep_reward)
             ep_reward = 0
     return steps, episode_rewards
-
-
-def random_choice(
-    candidates: List[Any],
-    strategy: str = "recency",
-    recency_bias: float = 0.3,
-) -> Any:
-    """
-    选择合作伙伴策略（partner）。
-
-    Parameters
-    ----------
-    candidates : list
-        策略对象列表（如 Policy、Agent 等）。
-    strategy : {"uniform", "recency"}
-        - "uniform" : 每个策略等概率抽取。
-        - "recency":  最近策略出现概率为 `recency_bias`，
-                      其余概率按指数衰减分配给更旧策略。
-    recency_bias : float, optional
-        当 strategy == "recency" 时，最新策略被选中的目标概率。
-        0.5–0.9 通常效果较好。
-
-    Returns
-    -------
-    Any
-        被选中的策略对象。
-    """
-    if not candidates:
-        raise ValueError("random_choice: `candidates` 不能为空。")
-
-    # 只有一个候选时直接返回
-    if len(candidates) == 1 or strategy == "uniform":
-        return random.choice(candidates)
-
-    if strategy == "recency":
-        n = len(candidates)
-        # 最旧 → 最新 的权重（指数衰减）
-        # w_i ∝ (1 - recency_bias)^(n-1-i)       i = 0 … n-2
-        # w_{n-1} = recency_bias
-        weights = [(1.0 - recency_bias) ** (n - 1 - i) for i in range(n)]
-        weights[-1] = recency_bias
-        # 归一化
-        total = sum(weights)
-        weights = [w / total for w in weights]
-        # random.choices 支持按概率抽样
-        return random.choices(candidates, weights=weights, k=1)[0]
-
-    raise ValueError(f"random_choice: 未知 strategy='{strategy}'")
 
 def main():
     config = {
@@ -126,7 +77,10 @@ def main():
         'max_episodes': 1000,
         'max_timesteps': 5000000,
         'mini_batch_size': 64,
+        'tom_input_size': 64,
+        'tom_hidden_size': 64,
         'continuous': False,
+        'target_reward': 200,
     }
     param = ParameterManager(config)
 
@@ -138,8 +92,8 @@ def main():
 
     state_norm = Normalization(state_dim)
     agent_ego = PPOAgent(state_dim, action_dim, 128, config)
-    agent_partner = PPOAgent(state_dim, action_dim, 128, config)
-    agent_pop = [agent_partner]
+    agent_partner = deepcopy(agent_ego)
+    agent_pop = []
     zsc_agent = build_eval_agent(env, "Random")
 
     buffer = ReplayBuffer()
@@ -147,7 +101,7 @@ def main():
     generation = 0
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_6', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_7', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
@@ -159,12 +113,13 @@ def main():
         all_episode_rewards_eval = []
 
         while total_timesteps < param.get("max_timesteps"):
-            partner = random_choice(agent_pop + [agent_ego])
-            steps, episode_rewards = sp_collect_samples(env, agent_ego, partner, buffer, param.get("batch_size"), state_norm)
+            # partner = random_choice(agent_pop + [agent_ego])
+            steps, episode_rewards = sp_collect_samples(env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm)
             total_timesteps += steps
             all_episode_rewards.extend(episode_rewards)
 
             train(agent_ego, buffer, writer, total_timesteps)
+            agent_partner = deepcopy(agent_ego)
             # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm)
             all_episode_rewards_eval.extend(episode_rewards_eval)
@@ -175,14 +130,15 @@ def main():
                 writer.add_scalar("Reward/avg_last10", avg_reward, total_timesteps)
                 avg_reward_eval = np.mean(all_episode_rewards_eval[-10:])
                 writer.add_scalar("Reward/eval", avg_reward_eval, total_timesteps)
-                if avg_reward > 135:
+                if avg_reward > param.get("target_reward"):
                     break
         if np.mean(all_episode_rewards[-10:]) < 1e-2:
             print("training finished early")
             break
 
-        agent_pop.append(agent_ego)
+        agent_pop.append(deepcopy(agent_ego))
         agent_ego = PPOAgent(state_dim, action_dim, 128, config)
+        agent_partner  = deepcopy(agent_ego)
 
         if generation > 10:
             print("training finished")

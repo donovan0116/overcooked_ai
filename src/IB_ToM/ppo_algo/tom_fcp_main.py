@@ -1,5 +1,7 @@
+import time
 from copy import deepcopy
 import torch
+import random
 
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
@@ -76,6 +78,8 @@ def tom_fcp_train(agent, buffer, writer, global_step, tom_model):
 
 
 def fcp_build_population(env, agent_ego, agent_partner, buffer, state_norm, param, tom_model, dataset, seed):
+    torch.manual_seed(seed + int(time.time() % 1000000))
+    random.seed(seed + int(time.time() % 1000000))
     result_agent_pop = [deepcopy(agent_ego)]
     total_timesteps = 0
     all_episode_rewards = []

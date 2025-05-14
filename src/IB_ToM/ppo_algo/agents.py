@@ -48,6 +48,12 @@ class PPOAgent:
         log_prob = dist.log_prob(action)
         return action.item(), log_prob.item()
 
+    def get_policy_entropy(self, state):
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        probs = self.actor(state_tensor)
+        dist = torch.distributions.Categorical(probs)
+        return dist.entropy().mean()
+
     def con_select_action(self, state):
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
         return self.actor.get_action(state_tensor)

@@ -1,7 +1,10 @@
 from copy import deepcopy
 
+import torch
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
+import random
+import time
 
 from IB_ToM.ppo_algo.agents import PPOAgent
 from IB_ToM.ppo_algo.ppo import Normalization, get_run_log_dir
@@ -11,6 +14,8 @@ from IB_ToM.utils.utils import ParameterManager, env_maker, ReplayBuffer, build_
 
 
 def fcp_build_population(env, agent_ego, agent_partner, buffer, state_norm, param, seed):
+    torch.manual_seed(seed + int(time.time() % 1000000))
+    random.seed(seed + int(time.time() % 1000000))
     result_agent_pop = [deepcopy(agent_ego)]
     total_timesteps = 0
     all_episode_rewards = []
@@ -54,7 +59,7 @@ def main():
         'tom_hidden_size': 64,
         'continuous': False,
         'target_reward': 200,
-        'partners_num': 1,
+        'partners_num': 5,
         'checkpoint': 1e5,
     }
     # Stage 1: Train diverse partner population
@@ -80,14 +85,14 @@ def main():
     zsc_agent = build_eval_agent(env, "Random")
 
     # regular training fcp_agent by population
-    log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_6', 'generation')
+    log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_8', 'generation')
     writer = SummaryWriter(log_dir=log_dir)
     total_timesteps = 0
     all_episode_rewards = []
     all_episode_rewards_eval = []
 
     while total_timesteps < param.get("max_timesteps"):
-        partner = random_choice(population)
+        partner = random_choice(population, "uniform")
         steps, episode_rewards = sp_collect_samples(
             env, agent_fcp, partner, buffer, param.get("batch_size"), state_norm)
         total_timesteps += steps

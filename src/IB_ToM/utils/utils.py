@@ -274,3 +274,23 @@ def random_choice(
 
     raise ValueError(f"random_choice: 未知 strategy='{strategy}'")
 
+def modify_tuple(t: tuple, index: int, value) -> tuple:
+    """
+    Return a new tuple with one element modified at the specified index.
+
+    Parameters:
+    - t: original tuple
+    - index: index to modify (supports negative indexing)
+    - value: new value to insert
+
+    Returns:
+    - new tuple with value at index replaced
+    """
+    if not isinstance(t, tuple):
+        raise TypeError("Input must be a tuple.")
+    if not (-len(t) <= index < len(t)):
+        raise IndexError("Index out of range.")
+
+    t_list = list(t)
+    t_list[index] = value
+    return tuple(t_list)

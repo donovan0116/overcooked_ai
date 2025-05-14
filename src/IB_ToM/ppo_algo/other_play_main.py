@@ -21,7 +21,7 @@ def op_train(agent, buffer, writer, global_step):
 
 
 
-def sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm):
+def op_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm):
     """
     Collect samples for self-play training.
 
@@ -162,7 +162,7 @@ def main():
 
         while total_timesteps < param.get("max_timesteps"):
             partner = random_choice(agent_pop + [agent_partner])
-            steps, episode_rewards = sp_collect_samples(env, agent_ego, partner, buffer, param.get("batch_size"), state_norm)
+            steps, episode_rewards = op_collect_samples(env, agent_ego, partner, buffer, param.get("batch_size"), state_norm)
             total_timesteps += steps
             all_episode_rewards.extend(episode_rewards)
 

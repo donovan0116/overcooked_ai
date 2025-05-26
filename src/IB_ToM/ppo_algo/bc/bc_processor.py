@@ -1,3 +1,10 @@
+"""
+bc_processor.py
+
+This file is used to preprocess human demonstration data by organizing it into labeled formats suitable for
+behavior cloning (BC) training.
+"""
+
 import json
 import os
 

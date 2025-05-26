@@ -208,7 +208,7 @@ def main():
     pop = tom_train_mep_population(env, pop, param, state_norm, tom_model, dataset)
     # Stage 2: train BR agent from MEP population (for 10 times).
     agent_ego = ToMPPOAgent(state_dim, action_dim, 128, param)
-    zsc_agent = build_eval_agent(env, "Random")
+    zsc_agent = build_eval_agent(env, config, "Random")
 
     buffer = ReplayBuffer()
 

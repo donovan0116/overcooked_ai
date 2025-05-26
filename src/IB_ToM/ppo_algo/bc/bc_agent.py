@@ -90,9 +90,12 @@ class BCLSTMAgent:
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.5)
         self.cross_entropy = torch.nn.CrossEntropyLoss()
 
-    def select_action(self, state: deque, hidden=None):
+        self.state_deque = deque(maxlen=self.param.get("bc_seq_len"))
+
+    def select_action(self, state, hidden=None):
         with torch.no_grad():
-            state_tensor = torch.tensor(np.stack(state), dtype=torch.float32).unsqueeze(0).to(self.device)
+            self.state_deque.append(state)
+            state_tensor = torch.tensor(np.stack(self.state_deque), dtype=torch.float32).unsqueeze(0).to(self.device)
             probs, _ = self.actor(state_tensor, hidden)
             dist = torch.distributions.Categorical(probs)
             action = dist.sample()

@@ -142,7 +142,7 @@ def main():
     agent_ego = PPOAgent(state_dim, action_dim, 128, config)
     agent_partner = deepcopy(agent_ego)
     agent_pop = []
-    zsc_agent = build_eval_agent(env, "Random")
+    zsc_agent = build_eval_agent(env, config, "Random")
 
     buffer = ReplayBuffer()
 

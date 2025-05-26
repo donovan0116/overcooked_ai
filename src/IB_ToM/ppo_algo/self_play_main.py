@@ -81,6 +81,9 @@ def main():
         'tom_hidden_size': 64,
         'continuous': False,
         'target_reward': 180,
+        'bc_batch_size': 128,
+        'bc_seq_len': 10,
+        'bc_epoch': 10,
     }
     param = ParameterManager(config)
 
@@ -95,14 +98,14 @@ def main():
     # agent_partner = deepcopy(agent_ego)
     agent_partner = agent_ego
     agent_pop = []
-    zsc_agent = build_eval_agent(env, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     buffer = ReplayBuffer()
 
     generation = 0
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_17', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_test', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 

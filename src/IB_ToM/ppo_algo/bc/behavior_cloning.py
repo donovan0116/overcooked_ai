@@ -1,3 +1,10 @@
+"""
+behavior_cloning.py
+
+This file is used to train behavior cloning (BC) agents, including both MLP-based and LSTM-based models,
+and to perform simple evaluations.
+"""
+
 from collections import deque
 
 from IB_ToM.ppo_algo.bc.bc_agent import BCMLPAgent, BCLSTMAgent
@@ -27,9 +34,9 @@ if __name__ == "__main__":
         'checkpoint': 1e6,
         'bc_batch_size': 128,
         'bc_seq_len': 10,
+        'bc_epoch': 10,
         'bc_data_addr_train': "./human_data/2019_hh_trials_train.pt",
         'bc_data_addr_test': "./human_data/2019_hh_trials_test.pt",
-        'bc_epoch': 4000,
     }
 
     param = ParameterManager(config)
@@ -46,7 +53,7 @@ if __name__ == "__main__":
     bc_lstm_agent.update()
     bc_lstm_agent.evaluation()
 
-    bc_lstm_agent.save("./trained_models/bc_lstm_agent.pth")
+    # bc_lstm_agent.save("./trained_models/bc_lstm_agent.pth")
 
     # evaluation by env
     epoch = 100
@@ -54,20 +61,14 @@ if __name__ == "__main__":
         state = env.reset()
         obs_ego, obs_partner = overcooked_obs_process(state)
         ep_reward = 0
-        obs_ego_seq = deque(maxlen=param.get("bc_seq_len"))
-        obs_partner_seq = deque(maxlen=param.get("bc_seq_len"))
-        obs_ego_seq.append(obs_ego)
-        obs_partner_seq.append(obs_partner)
         while True:
-            action_ego, _ = bc_lstm_agent.select_action(obs_ego_seq)
-            action_partner, _ = bc_lstm_agent.select_action(obs_partner_seq)
+            action_ego, _ = bc_lstm_agent.select_action(obs_ego)
+            action_partner, _ = bc_lstm_agent.select_action(obs_partner)
             next_state, reward, done, _ = env.step([action_ego, action_partner])
             next_obs_ego, next_obs_partner = overcooked_obs_process(next_state)
             ep_reward += reward
             obs_ego = next_obs_ego
             obs_partner = next_obs_partner
-            obs_ego_seq.append(obs_ego)
-            obs_partner_seq.append(obs_partner)
             if done:
                 break
         print(f"epoch:{i}, total_reward: {ep_reward}")

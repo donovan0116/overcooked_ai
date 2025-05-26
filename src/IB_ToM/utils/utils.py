@@ -220,13 +220,26 @@ def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, d
     return episode_rewards
 
 
-def build_eval_agent(env, eval_agent_choice="Random"):
+def build_eval_agent(env, config, eval_agent_choice="Random", layout="cramped_room"):
     if eval_agent_choice == "Random":
         from src.IB_ToM.ppo_algo.agents import RandomAgent
         return RandomAgent(env)
-    elif eval_agent_choice == "Human":
-        from src.IB_ToM.ppo_algo.agents import HumanAgent
-        return HumanAgent()
+    elif eval_agent_choice == "Human_MLP":
+        from src.IB_ToM.ppo_algo.bc.bc_agent import BCMLPAgent
+        bc_mlp_agent = BCMLPAgent(state_dim=env.observation_space.shape[0],
+                                  action_dim=env.action_space.n,
+                                  hidden_dim=128,
+                                  config=config)
+        bc_mlp_agent.load("../ppo_algo/bc/trained_models/bc_mlp_agent.pth")
+        return bc_mlp_agent
+    elif eval_agent_choice == "Human_LSTM":
+        from src.IB_ToM.ppo_algo.bc.bc_agent import BCLSTMAgent
+        bc_lstm_agent = BCLSTMAgent(state_dim=env.observation_space.shape[0],
+                                  action_dim=env.action_space.n,
+                                  hidden_dim=128,
+                                  config=config)
+        bc_lstm_agent.load("../ppo_algo/bc/trained_models/bc_lstm_agent.pth")
+        return bc_lstm_agent
     else:
         raise ValueError("Invalid eval_agent_choice")
 

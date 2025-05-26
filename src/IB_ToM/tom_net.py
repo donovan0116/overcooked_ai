@@ -62,6 +62,49 @@ class ToMNet(nn.Module):
         recovery = self.decoder(z)
         return z, recovery.squeeze(0)
 
+class MLPToMNet(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, lamb=0.5):
+        super(MLPToMNet, self).__init__()
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.lamb = lamb
+        self.mu_layer = nn.Linear(self.hidden_size[0], self.hidden_size[0])
+        self.log_var_layer = nn.Linear(self.hidden_size[0], self.hidden_size[0])
+        if isinstance(self.hidden_size, list):
+            # self.lstm = nn.LSTM(input_size, self.hidden_size[0], batch_first=True)
+            self.encoder = nn.Linear(input_size, self.hidden_size[0])
+            layer = []
+            for i in range(len(self.hidden_size) - 1):
+                layer.append(nn.Linear(self.hidden_size[i], self.hidden_size[i + 1]))
+                layer.append(nn.Tanh())
+            layer.append(nn.Linear(self.hidden_size[-1], self.output_size))
+            self.decoder = nn.Sequential(*layer)
+        else:
+            # self.lstm = nn.LSTM(input_size, self.hidden_size, batch_first=True)
+            self.encoder = nn.Linear(input_size, self.hidden_size)
+            # used for training
+            self.decoder = nn.Linear(self.hidden_size, self.output_size)
+
+    def forward(self, x):
+        # x: (batch_size, seq_len, input_size)
+        if len(x.size()) != 3:
+            print("stop")
+        batch_size, seq_len, input_size = x.size()
+        encoder_out = self.encoder(x.view(-1, input_size))
+        mu = self.mu_layer(encoder_out)
+        log_var = self.log_var_layer(encoder_out)
+        std = torch.exp(0.5 * log_var)
+
+        # reparameterization trick
+        eps = torch.randn_like(std)
+        z = mu + std * eps
+        z = z.unsqueeze(0)
+        z = F.softmax(z, dim=-1)
+
+        recovery = self.decoder(z)
+        return z, recovery.squeeze(0)
+
 
 # in the first step of training, we only train the ToMNet as an encoder
 def train_step1(model_, dataset, batch_size=32, epoch=10, recon_loss_fn=None, optimizer=None):
@@ -323,6 +366,6 @@ if __name__ == '__main__':
     fake_dataset = make_fake_dataset(env, param.get("mini_batch_size") * 10, param.get("seq_len"))
     train_step1(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
     train_step2(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
-    train_step3(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
+    # train_step3(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
     dataset = fake_dataset
     pass

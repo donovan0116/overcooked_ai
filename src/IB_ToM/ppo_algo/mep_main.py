@@ -50,7 +50,7 @@ def mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state
 
     return steps, episode_rewards
 
-def train_mep_population(env, pop, param, state_norm):
+def train_mep_population_old(env, pop, param, state_norm):
     for i in range(param.get("pop_size")):
         agent_ego = pop[i]
         agent_partner = deepcopy(agent_ego)
@@ -76,6 +76,40 @@ def train_mep_population(env, pop, param, state_norm):
         print(f"Agent {i} in the population was trained.")
     return pop
 
+def train_mep_population(env, pop, param, state_norm):
+    total_timesteps = 0
+    buffer = ReplayBuffer()
+    # record all episode rewards for each agent in pop
+    all_episode_reward_set = []
+    pop_trained = []
+    for i in range(param.get("pop_size")):
+        all_episode_reward_set.append([])
+        pop_trained.append(False)
+
+    while total_timesteps < param.get("max_timesteps"):
+        steps_already_updated = False
+        for i in range(param.get("pop_size")):
+            if pop_trained[i]:
+                continue
+            agent_ego = pop[i]
+            agent_partner = deepcopy(agent_ego)
+            steps, episode_rewards = mep_collect_samples(
+                env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm, pop, param
+            )
+            if steps_already_updated is not True:
+                total_timesteps += steps
+                steps_already_updated = True
+            all_episode_reward_set[i].extend(episode_rewards)
+            agent_ego.update(buffer)
+            pop[i] = deepcopy(agent_ego)
+            if len(all_episode_reward_set[i]) >= 10:
+                avg_reward = np.mean(all_episode_reward_set[i][-10:])
+                print(f"[***Agent {i}***] Total Timesteps: {total_timesteps}, Average Reward (last 10 episodes): {avg_reward:.2f}")
+                if avg_reward > param.get("target_reward"):
+                    pop_trained[i] = True
+                    print(f"Agent {i} trained!")
+
+    return pop
 
 def rollout_and_evaluate(env, agent_br, partner, param, state_norm):
     eval_times = param.get("evaluate_times")
@@ -137,7 +171,7 @@ def main():
         # mep settings
         'pop_size': 5,
         'alpha': 0.01,
-        'beta_mep': 3,
+        'beta_mep': 1,
         'evaluate_times': 100,
     }
 
@@ -159,7 +193,7 @@ def main():
     pop = train_mep_population(env, pop, param, state_norm)
     # Stage 2: train BR agent from MEP population (for 10 times).
     agent_ego = PPOAgent(state_dim, action_dim, 128, param)
-    zsc_agent = build_eval_agent(env, "Random")
+    zsc_agent = build_eval_agent(env, config, "Random")
 
     buffer = ReplayBuffer()
 

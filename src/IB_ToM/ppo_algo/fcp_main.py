@@ -83,7 +83,7 @@ def main():
         print("========>There are ", len(population), " agents in the population. <========")
     # Stage 2: train FCP agent
     agent_fcp = PPOAgent(state_dim, action_dim, 128, config)
-    zsc_agent = build_eval_agent(env, "Random")
+    zsc_agent = build_eval_agent(env, config, "Random")
 
     # regular training fcp_agent by population
     log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_8', 'generation')

@@ -1,4 +1,3 @@
-from collections import deque
 from copy import deepcopy
 from typing import List, Any
 
@@ -6,17 +5,17 @@ import numpy as np
 import random
 
 import torch
-from torch.onnx.symbolic_opset11 import insert
 
-from IB_ToM.tom_net import ToMNet, make_fake_dataset, train_step1, train_step2, insert_dataset, train_tom_model
+from IB_ToM.ppo_algo.agents import ToMPPOAgent
+from IB_ToM.ppo_algo.ppo import Normalization, get_run_log_dir
+from IB_ToM.tom_net import ToMNet, make_fake_dataset, train_step1, train_step2, insert_dataset, train_tom_model, \
+    MLPToMNet
 from IB_ToM.utils.utils import ParameterManager, env_maker, print_generation_banner, tom_one_rollout, \
     tom_evaluate_policy
 from IB_ToM.utils.utils import ReplayBuffer, overcooked_obs_process, evaluate_policy, build_eval_agent
-from agents import PPOAgent, ToMPPOAgent
-from ppo import collect_samples, get_run_log_dir, Normalization
 from torch.utils.tensorboard import SummaryWriter
 
-def tom_sp_train(agent, buffer, writer, global_step, tom_model):
+def tom_op_train(agent, buffer, writer, global_step, tom_model):
     actor_loss, critic_loss = agent.update(buffer, tom_model)
     writer.add_scalar('Loss/Actor', actor_loss, global_step)
     writer.add_scalar('Loss/Critic', critic_loss, global_step)
@@ -169,7 +168,7 @@ def main():
     generation = 0
 
     # build tom model and do the initial training
-    tom_model = ToMNet(input_size=state_dim + 1,
+    tom_model = MLPToMNet(input_size=state_dim + 1,
                        hidden_size=[64, 256, state_dim + 1],
                        output_size=(state_dim + 1) * param.get("seq_len")).to('cuda')
 
@@ -179,7 +178,7 @@ def main():
     dataset = fake_dataset
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_17', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_16', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
@@ -191,16 +190,15 @@ def main():
         all_episode_rewards_eval = []
 
         while total_timesteps < param.get("max_timesteps"):
-            # partner = random_choice(agent_pop + [agent_ego])
+            partner = random_choice(agent_pop + [agent_partner])
             steps, episode_rewards = tom_sp_collect_samples(
-                env, agent_ego, agent_partner, buffer,
+                env, agent_ego, partner, buffer,
                 param.get("batch_size"), state_norm, tom_model, dataset)
             total_timesteps += steps
             all_episode_rewards.extend(episode_rewards)
 
-            tom_sp_train(agent_ego, buffer, writer, total_timesteps, tom_model)
+            tom_op_train(agent_ego, buffer, writer, total_timesteps, tom_model)
             agent_partner = deepcopy(agent_ego)
-            # todo: finish train tom model
             train_tom_model(tom_model, dataset, param)
             # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = tom_evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm,

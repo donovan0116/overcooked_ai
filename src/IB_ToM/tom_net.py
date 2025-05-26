@@ -6,9 +6,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from click.core import batch
 
-from IB_ToM.utils.utils import overcooked_obs_process
+from IB_ToM.utils.utils import overcooked_obs_process, env_maker, ParameterManager
 
 MAX_DATASET_NUM = 3200
+PROJ_DIM = 128
+TAU = 0.07
 
 
 class ToMNet(nn.Module):
@@ -86,32 +88,95 @@ def train_step1(model_, dataset, batch_size=32, epoch=10, recon_loss_fn=None, op
             # 防止过拟合
             return
 
+#
+# # in the second step of training, we train the ToMNet in representation space
+# def train_step2(model_, dataset, batch_size=32, epoch=10, optimizer=None):
+#     if optimizer is None:
+#         optimizer = optim.Adam(model_.parameters(), lr=0.001)
+#     for i in range(epoch):
+#         for batch_idx, data in enumerate(batch_generator(dataset, batch_size)):
+#             # compress_plan的格式为(num_layers * num_directions, batch_size, hidden_size)
+#             compress_plan, _ = model_(data)
+#             compress_plan_prime = compress_plan + torch.randn_like(compress_plan)
+#             mat = metrix_c(compress_plan, compress_plan_prime)
+#
+#             diag_elements = torch.diagonal(mat, dim1=-2, dim2=-1)
+#             loss1 = torch.sum((1 - diag_elements) ** 2, dim=-1)
+#
+#             mask = ~torch.eye(mat.size(-1), dtype=torch.bool)
+#             off_diag_elements = mat[..., mask].view(mat.shape[0], mat.shape[1], -1)
+#             loss2 = torch.sum(off_diag_elements ** 2, dim=-1)
+#
+#             loss = loss1 + model_.lamb * loss2
+#             loss = torch.mean(loss)
+#             optimizer.zero_grad()
+#             loss.backward()
+#             optimizer.step()
+#         # if i % 10 == 0:
+#         #     print("[Training 2] epoch:{}, loss: {}".format(i, loss.item()))
 
-# in the second step of training, we train the ToMNet in representation space
-def train_step2(model_, dataset, batch_size=32, epoch=10, optimizer=None):
+
+# project head for infonce compute
+class ProjectionHead(nn.Module):
+    def __init__(self, in_dim, out_dim=PROJ_DIM):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, out_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(out_dim, out_dim),
+        )
+
+    def forward(self, x):
+        return F.normalize(self.net(x), dim=-1)
+
+
+def infonce_loss(q, k, tau=TAU):
+    logits = torch.matmul(q, k.t()) / tau
+    labels = torch.arange(q.size(0), device=q.device)
+    return F.cross_entropy(logits, labels)
+
+
+def train_step2(model_, dataset, batch_size=32, epoch=10, optimizer=None, beta=3.0,
+                device='cuda' if torch.cuda.is_available() else 'cpu'):
+    model_.to(device)
+    sample = dataset[0]
+    state_dim = sample.size(-1) - 1
+    latent_dim = model_(sample.unsqueeze(0).to(device))[0].size(-1)
+
+    state_proj = ProjectionHead(state_dim).to(device)
+    action_proj = nn.Embedding(
+        num_embeddings=int(dataset[..., -1].max().item()) + 1,
+        embedding_dim=PROJ_DIM).to(device)
+    z_proj = ProjectionHead(latent_dim).to(device)
+    params = list(model_.parameters()) + list(state_proj.parameters()) + \
+             list(action_proj.parameters()) + list(z_proj.parameters())
     if optimizer is None:
         optimizer = optim.Adam(model_.parameters(), lr=0.001)
     for i in range(epoch):
         for batch_idx, data in enumerate(batch_generator(dataset, batch_size)):
-            # compress_plan的格式为(num_layers * num_directions, batch_size, hidden_size)
-            compress_plan, _ = model_(data)
-            compress_plan_prime = compress_plan + torch.randn_like(compress_plan)
-            mat = metrix_c(compress_plan, compress_plan_prime)
+            B, T, s_a_dim = data.size()
+            # state_dim = s_a_dim - 1
+            action_dim = 1
+            # get the data of state and action
+            data_s, data_a = torch.split(data, [state_dim, action_dim], dim=-1)
+            latent_z, _ = model_(data)
 
-            diag_elements = torch.diagonal(mat, dim1=-2, dim2=-1)
-            loss1 = torch.sum((1 - diag_elements) ** 2, dim=-1)
+            s_repr = data_s.mean(dim=1).view(B, state_dim)
+            z_repr = z_proj(latent_z.squeeze(0))
+            s_repr = state_proj(s_repr)
+            loss_i_zs = infonce_loss(z_repr, s_repr)
 
-            mask = ~torch.eye(mat.size(-1), dtype=torch.bool)
-            off_diag_elements = mat[..., mask].view(mat.shape[0], mat.shape[1], -1)
-            loss2 = torch.sum(off_diag_elements ** 2, dim=-1)
+            a_idx = data_a[:, -1, 0].long()
+            a_repr = F.normalize(action_proj(a_idx), dim=-1)
+            loss_i_za = infonce_loss(z_repr, a_repr)
 
-            loss = loss1 + model_.lamb * loss2
-            loss = torch.mean(loss)
+            ib_loss = loss_i_zs - beta * loss_i_za
+
             optimizer.zero_grad()
-            loss.backward()
+            ib_loss.backward()
             optimizer.step()
         # if i % 10 == 0:
-        #     print("[Training 2] epoch:{}, loss: {}".format(i, loss.item()))
+        #     print("[Training 3] epoch:{}, loss: {}".format(i, ib_loss.item()))
 
 
 # compute the cosine metrix C
@@ -165,6 +230,7 @@ def make_fake_dataset(env, data_num, seq_len, device='cuda'):
 
     return result
 
+
 def insert_dataset(dataset, dataset_item: list):
     # dataset_item中是一个seq长度的s-a pair，以tensor格式
     # 需要将这个list插入到dataset中
@@ -176,7 +242,10 @@ def insert_dataset(dataset, dataset_item: list):
     if dataset_item.dim() == 2:
         dataset_item = dataset_item.unsqueeze(0)
     dataset = torch.concat((dataset, dataset_item), dim=0)
+    if len(dataset) > MAX_DATASET_NUM:
+        dataset = dataset[-MAX_DATASET_NUM:]
     return dataset
+
 
 def batch_generator(dataset, batch_size):
     # dataset的格式为(batch_size, seq_len, input_size)
@@ -192,6 +261,11 @@ def batch_generator(dataset, batch_size):
         batch_data = dataset[i:i + batch_size]
         yield batch_data
 
+
+def infonce_calculate(dataset, batch_data):
+    pass
+
+
 def pre_process_dataset(dataset, batch_size):
     # dataset由尾插法构成
     # 首先处理成batch_size整数倍，逐步弹出头部数据
@@ -203,11 +277,52 @@ def pre_process_dataset(dataset, batch_size):
 
     return dataset
 
+
 def train_tom_model(tom_model, dataset, param):
     train_step1(tom_model, dataset, 64, 100)
     train_step2(tom_model, dataset, 64, 100)
 
 
 if __name__ == '__main__':
-    # Test training process
+    # Test training process 3
+    config = {
+        'lr_actor': 3e-4,
+        'lr_critic': 3e-4,
+        'gamma': 0.99,
+        'lambda': 0.95,
+        'clip_epsilon': 0.2,
+        'ppo_epochs': 10,
+        'batch_size': 4096,
+        'entropy_loss_coef': 0.01,
+        'value_loss_coef': 1.0,
+        'max_grad_norm': 0.5,
+        'max_episodes': 1000,
+        'max_timesteps': 5000000,
+        'mini_batch_size': 64,
+        'tom_input_size': 64,
+        'tom_hidden_size': 64,
+        'continuous': False,
+        'target_reward': 180,
+        'partners_num': 5,
+        'checkpoint': 1e6,
+        # tom hyper param
+        'seq_len': 2,
+    }
+    param = ParameterManager(config)
+    layout = "cramped_room"
+    env = env_maker("Overcooked-v0", layout_name=layout)
+
+    state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.n
+
+    # build tom model and do the initial training
+    tom_model = ToMNet(input_size=state_dim + 1,
+                       hidden_size=[64, 256, state_dim + 1],
+                       output_size=(state_dim + 1) * param.get("seq_len")).to('cuda')
+
+    fake_dataset = make_fake_dataset(env, param.get("mini_batch_size") * 10, param.get("seq_len"))
+    train_step1(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
+    train_step2(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
+    train_step3(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
+    dataset = fake_dataset
     pass

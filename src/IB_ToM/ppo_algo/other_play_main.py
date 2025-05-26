@@ -128,7 +128,7 @@ def main():
         'tom_input_size': 64,
         'tom_hidden_size': 64,
         'continuous': False,
-        'target_reward': 200,
+        'target_reward': 180,
     }
     param = ParameterManager(config)
 
@@ -149,7 +149,7 @@ def main():
     generation = 0
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_4', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_15', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
@@ -178,15 +178,15 @@ def main():
                 writer.add_scalar("Reward/avg_last10", avg_reward, total_timesteps)
                 avg_reward_eval = np.mean(all_episode_rewards_eval[-10:])
                 writer.add_scalar("Reward/eval", avg_reward_eval, total_timesteps)
-                if avg_reward > param.get("target_reward"):
-                    break
-        if np.mean(all_episode_rewards[-10:]) < 1e-2:
-            print("training finished early")
-            break
+                # if avg_reward > param.get("target_reward"):
+                #     break
+        # if np.mean(all_episode_rewards[-10:]) < 1e-2:
+        #     print("training finished early")
+        #     break
 
         agent_pop.append(deepcopy(agent_ego))
         agent_ego = PPOAgent(state_dim, action_dim, 128, config)
-        agent_partner  = deepcopy(agent_ego)
+        agent_partner = deepcopy(agent_ego)
 
         if generation > 10:
             print("training finished")

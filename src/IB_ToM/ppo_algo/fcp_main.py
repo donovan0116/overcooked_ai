@@ -14,8 +14,8 @@ from IB_ToM.utils.utils import ParameterManager, env_maker, ReplayBuffer, build_
 
 
 def fcp_build_population(env, agent_ego, agent_partner, buffer, state_norm, param, seed):
-    torch.manual_seed(seed + int(time.time() % 1000000))
-    random.seed(seed + int(time.time() % 1000000))
+    # torch.manual_seed(seed + int(time.time() % 1000000))
+    # random.seed(seed + int(time.time() % 1000000))
     result_agent_pop = [deepcopy(agent_ego)]
     total_timesteps = 0
     all_episode_rewards = []
@@ -32,6 +32,7 @@ def fcp_build_population(env, agent_ego, agent_partner, buffer, state_norm, para
             print(f"Total Timesteps: {total_timesteps}, Average Reward (last 10 episodes): {avg_reward:.2f}")
             # todo: save model
             if total_timesteps // param.get("checkpoint") > (total_timesteps - steps) // param.get("checkpoint"):
+                print(f"Save checkpoint at {total_timesteps}.")
                 # agent_ego.save(f"")
                 result_agent_pop.append(deepcopy(agent_ego))
             if avg_reward > param.get("target_reward"):
@@ -49,7 +50,7 @@ def main():
         'clip_epsilon': 0.2,
         'ppo_epochs': 10,
         'batch_size': 4096,
-        'entropy_loss_coef': 0.01,
+        'entropy_loss_coef': 0.0,
         'value_loss_coef': 1.0,
         'max_grad_norm': 0.5,
         'max_episodes': 1000,
@@ -58,9 +59,9 @@ def main():
         'tom_input_size': 64,
         'tom_hidden_size': 64,
         'continuous': False,
-        'target_reward': 200,
+        'target_reward': 180,
         'partners_num': 5,
-        'checkpoint': 1e5,
+        'checkpoint': 1e6,
     }
     # Stage 1: Train diverse partner population
     param = ParameterManager(config)
@@ -108,12 +109,10 @@ def main():
             writer.add_scalar("Reward/avg_last10", avg_reward, total_timesteps)
             avg_reward_eval = np.mean(all_episode_rewards_eval[-10:])
             writer.add_scalar("Reward/eval", avg_reward_eval, total_timesteps)
-            if avg_reward > param.get("target_reward"):
-                break
+            # if avg_reward > param.get("target_reward"):
+            #     break
     writer.close()
     env.close()
-
-
 
 if __name__  == '__main__':
     main()

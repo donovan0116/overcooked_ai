@@ -49,7 +49,7 @@ def tom_sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, st
     dataset_item = []
     while steps < batch_size:
         # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[0:32, :, :])
+        tom_latent, _ = tom_model(dataset[-32:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj = tom_one_rollout(
             env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0))
         buffer.push(*one_traj)
@@ -146,7 +146,7 @@ def main():
         'tom_input_size': 64,
         'tom_hidden_size': 64,
         'continuous': False,
-        'target_reward': 200,
+        'target_reward': 180,
         # tom hyper param
         'seq_len': 2,
     }
@@ -179,7 +179,7 @@ def main():
     dataset = fake_dataset
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_3', 'generation')
+        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_16', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
@@ -213,8 +213,8 @@ def main():
                 writer.add_scalar("Reward/avg_last10", avg_reward, total_timesteps)
                 avg_reward_eval = np.mean(all_episode_rewards_eval[-10:])
                 writer.add_scalar("Reward/eval", avg_reward_eval, total_timesteps)
-                if avg_reward > param.get("target_reward"):
-                    break
+                # if avg_reward > param.get("target_reward"):
+                #     break
         if np.mean(all_episode_rewards[-10:]) < 1e-2:
             print("training finished early")
             break

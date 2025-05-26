@@ -27,6 +27,40 @@ class Actor(nn.Module):
        probs = F.softmax(logits, dim=-1)
        return probs
 
+class BCMLPActor(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(BCMLPActor, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, hidden_size)
+        self.out = nn.Linear(hidden_size, output_size)
+        self.relu = nn.ReLU()
+        orthogonal_init(self.fc1)
+        orthogonal_init(self.fc2)
+        orthogonal_init(self.fc3)
+        orthogonal_init(self.out)
+
+    def forward(self, x):
+       x = self.relu(self.fc1(x))
+       x = self.relu(self.fc2(x))
+       x = self.relu(self.fc3(x))
+       logits = self.out(x)
+       probs = F.softmax(logits, dim=-1)
+       return probs, logits
+
+class BCLSTMActor(nn.Module):
+    def __init__(self, input_dim, hidden_dim, action_dim, num_layers=1):
+        super(BCLSTMActor, self).__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.out = nn.Linear(hidden_dim, action_dim)
+
+    def forward(self, x, hidden=None):
+        x, (h, c) = self.lstm(x, hidden)
+        x = x[:, -1, :]
+        logits = self.out(x)
+        probs = F.softmax(logits, dim=-1)
+        return probs, logits
+
 class ToMActor(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, tom_input_size, tom_hidden_size):
         super(ToMActor, self).__init__()

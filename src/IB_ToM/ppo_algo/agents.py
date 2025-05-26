@@ -11,6 +11,7 @@ import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 
+from IB_ToM.ppo_algo.bc.bc_agent import BCLSTMAgent, BCMLPAgent
 from networks import Actor, Critic, ConActor, ToMActor
 from src.IB_ToM.utils.utils import ParameterManager
 from src.IB_ToM.utils.utils import batch_generator
@@ -27,6 +28,30 @@ class RandomAgent:
 
     def tom_select_action(self, state, tom_latent):
         return self.env.action_space.sample(), 0
+
+class BCAgentLoader:
+    def __init__(self, env, bc_type, bc_data_addr="../bc/trained_models/"):
+        self.env = env
+        self.bc_type = bc_type
+        if self.bc_type == "lstm":
+            self.agent = BCLSTMAgent(env.observation_space.shape[0], env.action_space.n, 256, env.config)
+            self.agent.load(bc_data_addr + "/bc_lstm_agent.pth")
+        else:
+            self.agent = BCMLPAgent(env.observation_space.shape[0], env.action_space.n, 256, env.config)
+            self.agent.load(bc_data_addr + "/bc_mlp_agent.pth")
+    def select_action(self, state):
+        if self.bc_type == "lstm":
+            assert isinstance(state, deque)
+            return self.agent.select_action(state)
+        else:
+            return self.agent.select_action(state)
+
+    def tom_select_action(self, state, tom_latent):
+        if self.bc_type == "lstm":
+            assert isinstance(state, deque)
+            return self.agent.select_action(state)
+        else:
+            return self.agent.select_action(state)
 
 
 class PPOAgent:
@@ -48,11 +73,10 @@ class PPOAgent:
         log_prob = dist.log_prob(action)
         return action.item(), log_prob.item()
 
-    def get_policy_entropy(self, state):
+    def get_policy_probs(self, state):
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
         probs = self.actor(state_tensor)
-        dist = torch.distributions.Categorical(probs)
-        return dist.entropy().mean()
+        return probs
 
     def con_select_action(self, state):
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
@@ -186,6 +210,11 @@ class ToMPPOAgent:
         action = dist.sample()
         log_prob = dist.log_prob(action)
         return action.item(), log_prob.item()
+
+    def tom_get_policy_probs(self, state, tom_latent):
+        state_tensor = torch.tensor(state, dtype=torch.float32).to(self.device)
+        probs = self.actor(state_tensor, tom_latent)
+        return probs
 
     def update(self, buffer, tom_model):
         states, actions, rewards, next_states, dones, log_probs = buffer.get_batch()

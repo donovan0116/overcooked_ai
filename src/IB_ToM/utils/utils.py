@@ -1,6 +1,8 @@
 import random
 from typing import Any, List
 
+from torch.utils.data import TensorDataset, DataLoader
+
 from overcooked_ai_py.mdp.overcooked_env import (
     DEFAULT_ENV_PARAMS,
     OvercookedEnv,
@@ -19,11 +21,15 @@ import numpy as np
 
 import torch
 
+MAX_DATASET_NUM = 3200
+
+
 def env_maker(env_name="Overcooked-v0", layout_name="cramped_room"):
     base_mdp = OvercookedGridworld.from_layout_name(layout_name)
     base_env = OvercookedEnv.from_mdp(base_mdp, **DEFAULT_ENV_PARAMS, info_level=0)
     env = gymnasium.make(env_name, base_env=base_env, featurize_fn=base_env.featurize_state_mdp)
     return env
+
 
 def overcooked_obs_process(state):
     """
@@ -40,6 +46,7 @@ def overcooked_obs_process(state):
     obs_partner = both_agent_obs[1]
     return obs_ego, obs_partner
 
+
 def print_generation_banner(generation_num):
     banner = f"""
 ╔══════════════════════════════════════════════════════════╗
@@ -49,12 +56,16 @@ def print_generation_banner(generation_num):
 """
     print(banner)
 
+
 class ParameterManager:
     def __init__(self, config):
         self.config = config
 
     def get(self, key, default_value=None):
         return self.config.get(key, default_value)
+
+    def set(self, key, value):
+        self.config[key] = value
 
 
 class ReplayBuffer:
@@ -91,6 +102,7 @@ class ReplayBuffer:
                 np.array(self.dones),
                 np.array(self.log_probs))
 
+
 def batch_generator(states, actions, old_log_probs, advantages, returns, mini_batch_size):
     total_samples = len(states)
     indices = np.arange(total_samples)
@@ -101,6 +113,7 @@ def batch_generator(states, actions, old_log_probs, advantages, returns, mini_ba
         batch_idx = indices[start:end]
         # 根据索引提取对应的 mini-batch 数据
         yield states[batch_idx], actions[batch_idx], old_log_probs[batch_idx], advantages[batch_idx], returns[batch_idx]
+
 
 def one_rollout(env, agent, agent_partner, state_norm, obs_ego, obs_partner):
     """
@@ -124,8 +137,8 @@ def one_rollout(env, agent, agent_partner, state_norm, obs_ego, obs_partner):
     one_traj = (obs_ego, action_ego, reward, next_obs_ego, done, log_prob_ego)
     return next_obs_ego, next_obs_partner, reward, done, one_traj
 
-def tom_one_rollout(env, agent, agent_partner, state_norm, obs_ego, obs_partner, tom_latent):
 
+def tom_one_rollout(env, agent, agent_partner, state_norm, obs_ego, obs_partner, tom_latent):
     action_ego, log_prob_ego = agent.tom_select_action(obs_ego, tom_latent)
     action_partner, log_prob_partner = agent_partner.tom_select_action(obs_partner, tom_latent)
     next_state, reward, done, _ = env.step([action_ego, action_partner])
@@ -135,6 +148,7 @@ def tom_one_rollout(env, agent, agent_partner, state_norm, obs_ego, obs_partner,
     next_obs_partner = state_norm(next_obs_partner)
     one_traj = (obs_ego, action_ego, reward, next_obs_ego, done, log_prob_ego)
     return next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj
+
 
 @torch.no_grad()
 def evaluate_policy(env, agent_ego, partner, steps, state_norm):
@@ -162,6 +176,7 @@ def evaluate_policy(env, agent_ego, partner, steps, state_norm):
             ep_reward = 0
     return episode_rewards
 
+
 @torch.no_grad()
 def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, dataset):
     episode_rewards = []
@@ -174,7 +189,7 @@ def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, d
     dataset_item = []
     for _ in range(steps):
         # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[0:32, :, :])
+        tom_latent, _ = tom_model(dataset[-32:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, _ = tom_one_rollout(
             env, agent_ego, partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0)
         )
@@ -204,6 +219,7 @@ def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, d
             ep_reward = 0
     return episode_rewards
 
+
 def build_eval_agent(env, eval_agent_choice="Random"):
     if eval_agent_choice == "Random":
         from src.IB_ToM.ppo_algo.agents import RandomAgent
@@ -213,6 +229,7 @@ def build_eval_agent(env, eval_agent_choice="Random"):
         return HumanAgent()
     else:
         raise ValueError("Invalid eval_agent_choice")
+
 
 def insert_dataset(dataset, dataset_item: list):
     # dataset_item中是一个seq长度的s-a pair，以tensor格式
@@ -225,12 +242,15 @@ def insert_dataset(dataset, dataset_item: list):
     if dataset_item.dim() == 2:
         dataset_item = dataset_item.unsqueeze(0)
     dataset = torch.concat((dataset, dataset_item), dim=0)
+    if len(dataset) > MAX_DATASET_NUM:
+        dataset = dataset[-MAX_DATASET_NUM:]
     return dataset
 
+
 def random_choice(
-    candidates: List[Any],
-    strategy: str = "recency",
-    recency_bias: float = 0.3,
+        candidates: List[Any],
+        strategy: str = "recency",
+        recency_bias: float = 0.3,
 ) -> Any:
     """
     选择合作伙伴策略（partner）。
@@ -274,6 +294,7 @@ def random_choice(
 
     raise ValueError(f"random_choice: 未知 strategy='{strategy}'")
 
+
 def modify_tuple(t: tuple, index: int, value) -> tuple:
     """
     Return a new tuple with one element modified at the specified index.
@@ -294,3 +315,82 @@ def modify_tuple(t: tuple, index: int, value) -> tuple:
     t_list = list(t)
     t_list[index] = value
     return tuple(t_list)
+
+
+def mep_compute_avg_entropy(population, obs, tom_latent=None):
+    if tom_latent is not None:
+        all_probs = [agent.tom_get_policy_probs(obs, tom_latent) for agent in population]
+    else:
+        all_probs = [agent.get_policy_probs(obs) for agent in population]
+    probs_stack = torch.stack(all_probs, dim=0)
+    mean_probs = probs_stack.mean(dim=0).squeeze(0)
+    mean_dist = torch.distributions.Categorical(mean_probs)
+    avg_ent = mean_dist.entropy().item()
+    return avg_ent
+
+
+#############################
+#                           #
+#       Utiles for BC       #
+#                           #
+#############################
+
+def bc_process_dataset(
+        bc_data_addr: str,
+        param: ParameterManager,
+        bc_use_lstm: bool = False,
+        train_mode: bool = True):
+    trajs = torch.load(bc_data_addr, weights_only=False)
+    all_states = []
+    all_actions = []
+    if bc_use_lstm:
+        bc_seq_len = param.get("bc_seq_len")
+        for ep_states, ep_actions in zip(trajs['ep_states'], trajs['ep_actions']):
+            for i in range(len(ep_states) - bc_seq_len + 1):
+                seq_states = ep_states[i:i + bc_seq_len]
+                seq_actions = ep_actions[i + bc_seq_len - 1]
+                all_states.append(seq_states)
+                all_actions.append(seq_actions)
+        state_tensor = [torch.tensor(seq_states, dtype=torch.float32).to('cuda') for seq_states in all_states]
+        action_tensor = [torch.tensor(seq_actions, dtype=torch.long).to('cuda') for seq_actions in all_actions]
+        dataset = TensorDataset(torch.stack(state_tensor), torch.stack(action_tensor))
+        dataloader = DataLoader(dataset, batch_size=param.get("bc_batch_size"), shuffle=train_mode)
+
+    else:
+        for ep_states, ep_actions in zip(trajs['ep_states'], trajs['ep_actions']):
+            all_states.extend(ep_states)
+            all_actions.extend(ep_actions)
+        state_tensor = torch.tensor(all_states, dtype=torch.float32).to('cuda')
+        action_tensor = torch.tensor(all_actions, dtype=torch.long).to('cuda')
+        dataset = TensorDataset(state_tensor, action_tensor)
+        dataloader = DataLoader(dataset, batch_size=param.get("bc_batch_size"), shuffle=train_mode)
+    return dataloader
+
+
+if __name__ == "__main__":
+    config = {
+        'lr_actor': 3e-4,
+        'lr_critic': 3e-4,
+        'gamma': 0.99,
+        'lambda': 0.95,
+        'clip_epsilon': 0.2,
+        'ppo_epochs': 10,
+        'batch_size': 4096,
+        'entropy_loss_coef': 0.0,
+        'value_loss_coef': 1.0,
+        'max_grad_norm': 0.5,
+        'max_episodes': 1000,
+        'max_timesteps': 5000000,
+        'mini_batch_size': 64,
+        'tom_input_size': 64,
+        'tom_hidden_size': 64,
+        'continuous': False,
+        'target_reward': 180,
+        'partners_num': 5,
+        'checkpoint': 1e6,
+        'bc_batch_size': 64,
+        'bc_seq_len': 5,
+    }
+    param = ParameterManager(config)
+
+    bc_process_dataset('../ppo_algo/bc/human_data/2019_hh_trials_all.pt', param, True)

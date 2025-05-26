@@ -39,7 +39,7 @@ def tom_fcp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, s
     dataset_item = []
     while steps < batch_size:
         # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[0:32, :, :])
+        tom_latent, _ = tom_model(dataset[-32:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj = tom_one_rollout(
             env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0))
         buffer.push(*one_traj)
@@ -96,6 +96,7 @@ def fcp_build_population(env, agent_ego, agent_partner, buffer, state_norm, para
             print(f"Total Timesteps: {total_timesteps}, Average Reward (last 10 episodes): {avg_reward:.2f}")
             # todo: save model
             if total_timesteps // param.get("checkpoint") > (total_timesteps - steps) // param.get("checkpoint"):
+                print(f"Save checkpoint at {total_timesteps}.")
                 # agent_ego.save(f"")
                 result_agent_pop.append(deepcopy(agent_ego))
             if avg_reward > param.get("target_reward"):
@@ -122,9 +123,9 @@ def main():
         'tom_input_size': 64,
         'tom_hidden_size': 64,
         'continuous': False,
-        'target_reward': 200,
-        'partners_num': 1,
-        'checkpoint': 1e5,
+        'target_reward': 180,
+        'partners_num': 5,
+        'checkpoint': 1e6,
         # tom hyper param
         'seq_len': 2,
     }
@@ -163,7 +164,7 @@ def main():
     zsc_agent = build_eval_agent(env, "Random")
 
     # regular training fcp_agent by population
-    log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_7', 'generation')
+    log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_13', 'generation')
     writer = SummaryWriter(log_dir=log_dir)
     total_timesteps = 0
     all_episode_rewards = []
@@ -188,8 +189,8 @@ def main():
             writer.add_scalar("Reward/avg_last10", avg_reward, total_timesteps)
             avg_reward_eval = np.mean(all_episode_rewards_eval[-10:])
             writer.add_scalar("Reward/eval", avg_reward_eval, total_timesteps)
-            if avg_reward > param.get("target_reward"):
-                break
+            # if avg_reward > param.get("target_reward"):
+            #     break
     writer.close()
     env.close()
 

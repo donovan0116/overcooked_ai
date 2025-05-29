@@ -179,3 +179,6 @@ src/overcooked_demo/server/overcooked_ai/
 src/IB_ToM/ppo_algo/logs/
 src/IB_ToM/ppo_algo/bc/human_data/
 src/IB_ToM/ppo_algo/bc/trained_models/
+src/IB_ToM/ppo_algo/evolution/tsne_data/
+src/IB_ToM/ppo_algo/ablate_experiment/logs/
+src/IB_ToM/logs/

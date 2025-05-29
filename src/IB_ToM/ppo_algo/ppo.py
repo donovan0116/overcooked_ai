@@ -10,10 +10,10 @@ import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 
-from networks import Actor, Critic, ConActor
+from IB_ToM.ppo_algo.networks import Actor, Critic, ConActor
 from src.IB_ToM.utils.utils import ParameterManager
 from src.IB_ToM.utils.utils import ReplayBuffer
-from agents import PPOAgent
+from IB_ToM.ppo_algo.agents import PPOAgent
 
 import torch.optim as optim
 
@@ -70,6 +70,7 @@ def get_run_log_dir(base_dir, prefix):
     # 自增计算下一个 run number
     run_number = max(run_numbers) + 1 if run_numbers else 1
     run_dir = os.path.join(base_dir, f"{prefix}_{run_number}")
+    print(f"Training in {run_dir}.")
     return run_dir
 
 

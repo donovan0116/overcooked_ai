@@ -28,6 +28,10 @@ class BCMLPAgent:
             log_prob = dist.log_prob(action)
             return action.item(), log_prob.item()
 
+    def tom_select_action(self, state, tom_latent):
+        with torch.no_grad():
+            return self.select_action(state)
+
     def update(self):
         addr_train = self.param.get("bc_data_addr_train")
         assert addr_train is not None
@@ -101,6 +105,10 @@ class BCLSTMAgent:
             action = dist.sample()
             log_prob = dist.log_prob(action)
             return action.item(), log_prob.item()
+
+    def tom_select_action(self, state, tom_latent):
+        with torch.no_grad():
+            return self.select_action(state)
 
     def update(self):
         addr_train = self.param.get("bc_data_addr_train")

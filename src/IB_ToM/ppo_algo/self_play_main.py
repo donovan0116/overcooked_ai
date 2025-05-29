@@ -125,7 +125,6 @@ def main():
             train(agent_ego, buffer, writer, total_timesteps)
             # agent_partner = deepcopy(agent_ego)
             agent_partner = agent_ego
-            # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm)
             all_episode_rewards_eval.extend(episode_rewards_eval)
 

@@ -148,6 +148,7 @@ def main():
         'target_reward': 180,
         # tom hyper param
         'seq_len': 2,
+        'tom_batch_size': 32,
     }
     param = ParameterManager(config)
 
@@ -161,7 +162,7 @@ def main():
     agent_ego = ToMPPOAgent(state_dim, action_dim, 128, config)
     agent_partner = deepcopy(agent_ego)
     agent_pop = []
-    zsc_agent = build_eval_agent(env, config, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     buffer = ReplayBuffer()
 
@@ -200,9 +201,8 @@ def main():
             tom_op_train(agent_ego, buffer, writer, total_timesteps, tom_model)
             agent_partner = deepcopy(agent_ego)
             train_step1(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
-            # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = tom_evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm,
-                                                       tom_model, dataset)
+                                                       tom_model, dataset, param.get("tom_batch_size"), param.get("seq_len"))
             all_episode_rewards_eval.extend(episode_rewards_eval)
 
             if len(all_episode_rewards) >= 10 and len(all_episode_rewards_eval) >= 10:

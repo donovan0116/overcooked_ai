@@ -50,32 +50,6 @@ def mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state
 
     return steps, episode_rewards
 
-def train_mep_population_old(env, pop, param, state_norm):
-    for i in range(param.get("pop_size")):
-        agent_ego = pop[i]
-        agent_partner = deepcopy(agent_ego)
-        buffer = ReplayBuffer()
-        total_timesteps = 0
-        all_episode_rewards = []
-
-        while total_timesteps < param.get("max_timesteps"):
-            steps, episode_rewards = mep_collect_samples(
-                env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm, pop, param
-            )
-            total_timesteps += steps
-            all_episode_rewards.extend(episode_rewards)
-
-            agent_ego.update(buffer)
-            agent_partner = deepcopy(agent_ego)
-            if len(all_episode_rewards) >= 10:
-                avg_reward = np.mean(all_episode_rewards[-10:])
-                print(f"Total Timesteps: {total_timesteps}, Average Reward (last 10 episodes): {avg_reward:.2f}")
-                if avg_reward > param.get("target_reward"):
-                    pop[i] = deepcopy(agent_ego)
-                    break
-        print(f"Agent {i} in the population was trained.")
-    return pop
-
 def train_mep_population(env, pop, param, state_norm):
     total_timesteps = 0
     buffer = ReplayBuffer()
@@ -173,6 +147,9 @@ def main():
         'alpha': 0.01,
         'beta_mep': 1,
         'evaluate_times': 100,
+        'bc_batch_size': 128,
+        'bc_seq_len': 10,
+        'bc_epoch': 10,
     }
 
     param = ParameterManager(config)
@@ -193,7 +170,7 @@ def main():
     pop = train_mep_population(env, pop, param, state_norm)
     # Stage 2: train BR agent from MEP population (for 10 times).
     agent_ego = PPOAgent(state_dim, action_dim, 128, param)
-    zsc_agent = build_eval_agent(env, config, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     buffer = ReplayBuffer()
 
@@ -218,7 +195,6 @@ def main():
             actor_loss, critic_loss = agent_ego.update(buffer)
             writer.add_scalar('Loss/Actor', actor_loss, total_timesteps)
             writer.add_scalar('Loss/Critic', critic_loss, total_timesteps)
-            # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm)
             all_episode_rewards_eval.extend(episode_rewards_eval)
 

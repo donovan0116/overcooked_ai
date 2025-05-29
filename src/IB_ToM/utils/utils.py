@@ -1,3 +1,4 @@
+import os
 import random
 from typing import Any, List
 
@@ -178,7 +179,7 @@ def evaluate_policy(env, agent_ego, partner, steps, state_norm):
 
 
 @torch.no_grad()
-def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, dataset):
+def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, dataset, tom_batch_size, seq_len):
     episode_rewards = []
     state = env.reset()
     obs_ego, obs_partner = overcooked_obs_process(state)
@@ -188,8 +189,7 @@ def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, d
     ep_reward = 0
     dataset_item = []
     for _ in range(steps):
-        # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[-32:, :, :])
+        tom_latent, _ = tom_model(dataset[-tom_batch_size:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, _ = tom_one_rollout(
             env, agent_ego, partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0)
         )
@@ -201,8 +201,7 @@ def tom_evaluate_policy(env, agent_ego, partner, steps, state_norm, tom_model, d
                 ]
             )
         )
-        # todo: '2' needed to be replaced by seq_len param
-        if len(dataset_item) == 2:
+        if len(dataset_item) == seq_len:
             dataset = insert_dataset(dataset, dataset_item)
             dataset_item = []
 
@@ -238,7 +237,9 @@ def build_eval_agent(env, config, eval_agent_choice="Random", layout="cramped_ro
                                   action_dim=env.action_space.n,
                                   hidden_dim=128,
                                   config=config)
-        bc_lstm_agent.load("../ppo_algo/bc/trained_models/bc_lstm_agent.pth")
+        base_dir = os.path.dirname(__file__)  # 当前文件所在目录
+        ckpt_path = os.path.abspath(os.path.join(base_dir, "..", "ppo_algo", "bc", "trained_models", "bc_lstm_agent.pth"))
+        bc_lstm_agent.load(ckpt_path)
         return bc_lstm_agent
     else:
         raise ValueError("Invalid eval_agent_choice")

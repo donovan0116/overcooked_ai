@@ -8,13 +8,14 @@ from IB_ToM.ppo_algo.agents import PPOAgent, ToMPPOAgent
 from IB_ToM.ppo_algo.ppo import Normalization, get_run_log_dir
 from IB_ToM.ppo_algo.self_play_main import sp_collect_samples
 from IB_ToM.ppo_algo.tom_fcp_main import tom_fcp_collect_samples
-from IB_ToM.tom_net import ToMNet, make_fake_dataset, train_step1, train_step2, train_tom_model
+from IB_ToM.tom_net import ToMNet, make_fake_dataset, train_step1, train_step2, train_tom_model, insert_dataset
 from IB_ToM.utils.utils import ParameterManager, env_maker, ReplayBuffer, overcooked_obs_process, \
-    build_eval_agent, evaluate_policy, print_generation_banner, modify_tuple, tom_one_rollout, insert_dataset, \
+    build_eval_agent, evaluate_policy, print_generation_banner, modify_tuple, tom_one_rollout, \
     tom_evaluate_policy, mep_compute_avg_entropy
 
 
-def tom_mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, population, param, tom_model, dataset):
+def tom_mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, population, param, tom_model, dataset,
+                            tom_batch_size, seq_len):
     """
     Similar to the function sp_collect_samples(), which add the augment reward compute.
     """
@@ -28,8 +29,7 @@ def tom_mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, s
     ep_reward = 0
     dataset_item = []
     while steps < batch_size:
-        # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[-32:, :, :])
+        tom_latent, _ = tom_model(dataset[-tom_batch_size:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj = tom_one_rollout(
             env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0)
         )
@@ -50,8 +50,7 @@ def tom_mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, s
                 ]
             )
         )
-        # todo: '2' needed to be replaced by seq_len param
-        if len(dataset_item) == 2:
+        if len(dataset_item) == seq_len:
             dataset = insert_dataset(dataset, dataset_item)
             dataset_item = []
 
@@ -71,33 +70,44 @@ def tom_mep_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, s
     return steps, episode_rewards
 
 def tom_train_mep_population(env, pop, param, state_norm, tom_model, dataset):
+    total_timesteps = 0
+    buffer = ReplayBuffer()
+    # record all episode rewards for each agent in pop
+    all_episode_reward_set = []
+    pop_trained = []
     for i in range(param.get("pop_size")):
-        agent_ego = pop[i]
-        agent_partner = deepcopy(agent_ego)
-        buffer = ReplayBuffer()
-        total_timesteps = 0
-        all_episode_rewards = []
+        all_episode_reward_set.append([])
+        pop_trained.append(False)
 
-        while total_timesteps < param.get("max_timesteps"):
+    while total_timesteps < param.get("max_timesteps"):
+        steps_already_updated = False
+        for i in range(param.get("pop_size")):
+            if pop_trained[i]:
+                continue
+            agent_ego = pop[i]
+            agent_partner = deepcopy(agent_ego)
             steps, episode_rewards = tom_mep_collect_samples(
-                env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm, pop, param, tom_model, dataset
-            )
-            total_timesteps += steps
-            all_episode_rewards.extend(episode_rewards)
-
+                env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm, pop, param, tom_model,
+                dataset, param.get("tom_batch_size"), param.get("seq_len"))
+            if steps_already_updated is not True:
+                total_timesteps += steps
+                steps_already_updated = True
+            all_episode_reward_set[i].extend(episode_rewards)
             agent_ego.update(buffer, tom_model)
             train_tom_model(tom_model, dataset, param)
-            agent_partner = deepcopy(agent_ego)
-            if len(all_episode_rewards) >= 10:
-                avg_reward = np.mean(all_episode_rewards[-10:])
+            pop[i] = deepcopy(agent_ego)
+            if len(all_episode_reward_set[i]) >= 10:
+                avg_reward = np.mean(all_episode_reward_set[i][-10:])
+                print(
+                    f"[***Agent {i}***] Total Timesteps: {total_timesteps}, Average Reward (last 10 episodes): {avg_reward:.2f}")
                 if avg_reward > param.get("target_reward"):
-                    pop[i] = deepcopy(agent_ego)
-                    print(f"Agent {i} in the population was trained.")
-                    break
+                    pop_trained[i] = True
+                    print(f"Agent {i} trained!")
+
     return pop
 
 
-def tom_rollout_and_evaluate(env, agent_br, partner, param, state_norm, tom_model, dataset):
+def tom_rollout_and_evaluate(env, agent_br, partner, param, state_norm, tom_model, dataset, tom_batch_size, seq_len):
     eval_times = param.get("evaluate_times")
     max_episodes = param.get("max_episodes")
     returns = []
@@ -109,7 +119,7 @@ def tom_rollout_and_evaluate(env, agent_br, partner, param, state_norm, tom_mode
         obs_partner = state_norm(obs_partner)
         dataset_item = []
         for _ in range(max_episodes):
-            tom_latent, _ = tom_model(dataset[-32:, :, :])
+            tom_latent, _ = tom_model(dataset[-tom_batch_size:, :, :])
             next_obs_ego, next_obs_partner, action_partner, reward, done, _ = tom_one_rollout(
                 env, agent_br, partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0)
             )
@@ -121,8 +131,7 @@ def tom_rollout_and_evaluate(env, agent_br, partner, param, state_norm, tom_mode
                     ]
                 )
             )
-            # todo: '2' needed to be replaced by seq_len param
-            if len(dataset_item) == 2:
+            if len(dataset_item) == seq_len:
                 dataset = insert_dataset(dataset, dataset_item)
                 dataset_item = []
             ep_reward += reward
@@ -139,7 +148,8 @@ def tom_mep_prior_choice(env, agent_br, pop, param, state_norm, tom_model, datas
     beta = param.get("beta_mep")
     returns = []
     for partner in pop:
-        returns.append(tom_rollout_and_evaluate(env, agent_br, partner, param, state_norm, tom_model, dataset))
+        returns.append(tom_rollout_and_evaluate(env, agent_br, partner, param, state_norm, tom_model, dataset,
+                                                param.get("tom_batch_size"), param.get("seq_len")))
 
     inv_returns = 1.0 / (np.array(returns) + 1e-8)
     sorted_indices = np.argsort(inv_returns)
@@ -172,11 +182,15 @@ def main():
         'continuous': False,
         'target_reward': 180,
         'seq_len': 2,
+        'tom_batch_size': 32,
         # mep settings
         'pop_size': 5,
         'alpha': 0.01,
         'beta_mep': 3,
         'evaluate_times': 100,
+        'bc_batch_size': 128,
+        'bc_seq_len': 10,
+        'bc_epoch': 10,
     }
 
     param = ParameterManager(config)
@@ -208,7 +222,7 @@ def main():
     pop = tom_train_mep_population(env, pop, param, state_norm, tom_model, dataset)
     # Stage 2: train BR agent from MEP population (for 10 times).
     agent_ego = ToMPPOAgent(state_dim, action_dim, 128, param)
-    zsc_agent = build_eval_agent(env, config, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     buffer = ReplayBuffer()
 
@@ -236,9 +250,8 @@ def main():
             writer.add_scalar('Loss/Actor', actor_loss, total_timesteps)
             writer.add_scalar('Loss/Critic', critic_loss, total_timesteps)
             train_tom_model(tom_model, dataset, param)
-            # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = tom_evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm,
-                                                   tom_model, dataset)
+                                                   tom_model, dataset, param.get("tom_batch_size"), param.get("seq_len"))
             all_episode_rewards_eval.extend(episode_rewards_eval)
 
             if len(all_episode_rewards) >= 10 and len(all_episode_rewards_eval) >= 10:

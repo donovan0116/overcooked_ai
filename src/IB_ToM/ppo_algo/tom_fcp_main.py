@@ -13,7 +13,8 @@ from IB_ToM.utils.utils import ParameterManager, env_maker, ReplayBuffer, build_
     tom_evaluate_policy, random_choice, overcooked_obs_process, tom_one_rollout
 
 
-def tom_fcp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, tom_model, dataset):
+def tom_fcp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, tom_model, dataset,
+                            tom_batch_size, seq_len):
     """
     Collect samples for self-play training.
 
@@ -38,8 +39,7 @@ def tom_fcp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, s
     ep_reward = 0
     dataset_item = []
     while steps < batch_size:
-        # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[-32:, :, :])
+        tom_latent, _ = tom_model(dataset[ - tom_batch_size:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj = tom_one_rollout(
             env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0))
         buffer.push(*one_traj)
@@ -51,8 +51,7 @@ def tom_fcp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, s
                 ]
             )
         )
-        # todo: '2' needed to be replaced by seq_len param
-        if len(dataset_item) == 2:
+        if len(dataset_item) == seq_len:
             dataset = insert_dataset(dataset, dataset_item)
             dataset_item = []
 
@@ -85,7 +84,8 @@ def fcp_build_population(env, agent_ego, agent_partner, buffer, state_norm, para
     all_episode_rewards = []
     while  total_timesteps < param.get("max_timesteps"):
         steps, episode_rewards = tom_fcp_collect_samples(
-            env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm, tom_model, dataset)
+            env, agent_ego, agent_partner, buffer, param.get("batch_size"), state_norm, tom_model, dataset,
+            param.get("tom_batch_size"), param.get("seq_len"))
         total_timesteps += steps
         all_episode_rewards.extend(episode_rewards)
         agent_ego.update(buffer, tom_model)
@@ -128,6 +128,10 @@ def main():
         'checkpoint': 1e6,
         # tom hyper param
         'seq_len': 2,
+        'tom_batch_size': 32,
+        'bc_batch_size': 128,
+        'bc_seq_len': 10,
+        'bc_epoch': 10,
     }
     # Stage 1: Train diverse partner population
     param = ParameterManager(config)
@@ -162,7 +166,7 @@ def main():
     print(f"Population training finished. Finally there are {len(population)} agents in the population.")
     # Stage 2: train FCP agent
     agent_fcp = ToMPPOAgent(state_dim, action_dim, 128, config)
-    zsc_agent = build_eval_agent(env, config, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     # regular training fcp_agent by population
     log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_13', 'generation')
@@ -174,14 +178,15 @@ def main():
     while total_timesteps < param.get("max_timesteps"):
         partner = random_choice(population)
         steps, episode_rewards = tom_fcp_collect_samples(
-            env, agent_fcp, partner, buffer, param.get("batch_size"), state_norm, tom_model, dataset)
+            env, agent_fcp, partner, buffer, param.get("batch_size"), state_norm, tom_model, dataset,
+            param.get("tom_batch_size"), param.get("seq_len"))
         total_timesteps += steps
         all_episode_rewards.extend(episode_rewards)
 
         tom_fcp_train(agent_fcp, buffer, writer, total_timesteps, tom_model)
         train_tom_model(tom_model, dataset, param)
         episode_rewards_eval = tom_evaluate_policy(env, agent_fcp, zsc_agent, param.get("batch_size"), state_norm,
-                                                   tom_model, dataset)
+                                                   tom_model, dataset, param.get("tom_batch_size"), param.get("seq_len"))
         all_episode_rewards_eval.extend(episode_rewards_eval)
 
         if len(all_episode_rewards) >= 10 and len(all_episode_rewards_eval) >= 10:

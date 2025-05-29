@@ -62,6 +62,9 @@ def main():
         'target_reward': 180,
         'partners_num': 5,
         'checkpoint': 1e6,
+        'bc_batch_size': 128,
+        'bc_seq_len': 10,
+        'bc_epoch': 10,
     }
     # Stage 1: Train diverse partner population
     param = ParameterManager(config)
@@ -83,7 +86,7 @@ def main():
         print("========>There are ", len(population), " agents in the population. <========")
     # Stage 2: train FCP agent
     agent_fcp = PPOAgent(state_dim, action_dim, 128, config)
-    zsc_agent = build_eval_agent(env, config, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     # regular training fcp_agent by population
     log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_8', 'generation')

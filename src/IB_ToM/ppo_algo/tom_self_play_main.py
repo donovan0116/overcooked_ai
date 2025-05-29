@@ -23,7 +23,8 @@ def tom_sp_train(agent, buffer, writer, global_step, tom_model):
     return actor_loss, critic_loss
 
 
-def tom_sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, tom_model, dataset):
+def tom_sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, state_norm, tom_model, dataset,
+                           tom_batch_size, seq_len):
     """
     Collect samples for self-play training.
 
@@ -48,8 +49,7 @@ def tom_sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, st
     ep_reward = 0
     dataset_item = []
     while steps < batch_size:
-        # todo: '32' needed to be replaced by param
-        tom_latent, _ = tom_model(dataset[-32:, :, :])
+        tom_latent, _ = tom_model(dataset[-tom_batch_size:, :, :])
         next_obs_ego, next_obs_partner, action_partner, reward, done, one_traj = tom_one_rollout(
             env, agent_ego, agent_partner, state_norm, obs_ego, obs_partner, tom_latent.mean(dim=1).squeeze(0))
         buffer.push(*one_traj)
@@ -61,8 +61,7 @@ def tom_sp_collect_samples(env, agent_ego, agent_partner, buffer, batch_size, st
                 ]
             )
         )
-        # todo: '2' needed to be replaced by seq_len param
-        if len(dataset_item) == 2:
+        if len(dataset_item) == seq_len:
             dataset = insert_dataset(dataset, dataset_item)
             dataset_item = []
 
@@ -149,6 +148,10 @@ def main():
         'target_reward': 180,
         # tom hyper param
         'seq_len': 2,
+        'tom_batch_size': 32,
+        'bc_batch_size': 128,
+        'bc_seq_len': 10,
+        'bc_epoch': 10,
     }
     param = ParameterManager(config)
 
@@ -162,7 +165,7 @@ def main():
     agent_ego = ToMPPOAgent(state_dim, action_dim, 128, config)
     agent_partner = deepcopy(agent_ego)
     agent_pop = []
-    zsc_agent = build_eval_agent(env, config, "Random")
+    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
 
     buffer = ReplayBuffer()
 
@@ -194,17 +197,15 @@ def main():
             # partner = random_choice(agent_pop + [agent_ego])
             steps, episode_rewards = tom_sp_collect_samples(
                 env, agent_ego, agent_partner, buffer,
-                param.get("batch_size"), state_norm, tom_model, dataset)
+                param.get("batch_size"), state_norm, tom_model, dataset, param.get("tom_batch_size"), param.get("seq_len"))
             total_timesteps += steps
             all_episode_rewards.extend(episode_rewards)
 
             tom_sp_train(agent_ego, buffer, writer, total_timesteps, tom_model)
             agent_partner = deepcopy(agent_ego)
-            # todo: finish train tom model
             train_tom_model(tom_model, dataset, param)
-            # todo: change partner in eval to a human policy as zero_shot
             episode_rewards_eval = tom_evaluate_policy(env, agent_ego, zsc_agent, param.get("batch_size"), state_norm,
-                                                       tom_model, dataset)
+                                                       tom_model, dataset, param.get("tom_batch_size"), param.get("seq_len"))
             all_episode_rewards_eval.extend(episode_rewards_eval)
 
             if len(all_episode_rewards) >= 10 and len(all_episode_rewards_eval) >= 10:

@@ -12,7 +12,7 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
 from IB_ToM.ppo_algo.bc.bc_agent import BCLSTMAgent, BCMLPAgent
-from networks import Actor, Critic, ConActor, ToMActor
+from IB_ToM.ppo_algo.networks import Actor, Critic, ConActor, ToMActor
 from src.IB_ToM.utils.utils import ParameterManager
 from src.IB_ToM.utils.utils import batch_generator
 

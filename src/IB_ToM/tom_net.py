@@ -194,7 +194,7 @@ def train_step2(model_, dataset, batch_size=32, epoch=10, optimizer=None, beta=3
     params = list(model_.parameters()) + list(state_proj.parameters()) + \
              list(action_proj.parameters()) + list(z_proj.parameters())
     if optimizer is None:
-        optimizer = optim.Adam(model_.parameters(), lr=0.001)
+        optimizer = optim.Adam(params, lr=0.001)
     for i in range(epoch):
         for batch_idx, data in enumerate(batch_generator(dataset, batch_size)):
             B, T, s_a_dim = data.size()
@@ -274,7 +274,7 @@ def make_fake_dataset(env, data_num, seq_len, device='cuda'):
     return result
 
 
-def insert_dataset(dataset, dataset_item: list):
+def insert_dataset(dataset_, dataset_item: list):
     # dataset_item中是一个seq长度的s-a pair，以tensor格式
     # 需要将这个list插入到dataset中
     # list的长度是seq_len，每一项的长度是state_dim+action_dim
@@ -284,10 +284,10 @@ def insert_dataset(dataset, dataset_item: list):
     dataset_item = torch.stack(dataset_item).to('cuda')
     if dataset_item.dim() == 2:
         dataset_item = dataset_item.unsqueeze(0)
-    dataset = torch.concat((dataset, dataset_item), dim=0)
-    if len(dataset) > MAX_DATASET_NUM:
-        dataset = dataset[-MAX_DATASET_NUM:]
-    return dataset
+    dataset_ = torch.concat((dataset_, dataset_item), dim=0)
+    if len(dataset_) > MAX_DATASET_NUM:
+        dataset_ = dataset_[-MAX_DATASET_NUM:]
+    return dataset_
 
 
 def batch_generator(dataset, batch_size):
@@ -303,10 +303,6 @@ def batch_generator(dataset, batch_size):
     for i in range(0, len(dataset), batch_size):
         batch_data = dataset[i:i + batch_size]
         yield batch_data
-
-
-def infonce_calculate(dataset, batch_data):
-    pass
 
 
 def pre_process_dataset(dataset, batch_size):
@@ -368,4 +364,3 @@ if __name__ == '__main__':
     train_step2(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
     # train_step3(tom_model, fake_dataset, param.get("mini_batch_size"), 10)
     dataset = fake_dataset
-    pass

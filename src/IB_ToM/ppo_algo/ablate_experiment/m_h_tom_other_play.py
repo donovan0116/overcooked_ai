@@ -149,6 +149,7 @@ def main():
         # tom hyper param
         'seq_len': 2,
         'tom_batch_size': 32,
+        'tom_epoch': 100,
     }
     param = ParameterManager(config)
 
@@ -162,7 +163,7 @@ def main():
     agent_ego = ToMPPOAgent(state_dim, action_dim, 128, config)
     agent_partner = deepcopy(agent_ego)
     agent_pop = []
-    zsc_agent = build_eval_agent(env, config, "Human_LSTM")
+    zsc_agent = build_eval_agent(env, config, "Random")
 
     buffer = ReplayBuffer()
 
@@ -179,7 +180,7 @@ def main():
     dataset = fake_dataset
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_16', 'generation')
+        log_dir = get_run_log_dir('../logs/tensorboard_logs/ppo_19', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 

@@ -148,6 +148,8 @@ def main():
         'target_reward': 180,
         # tom hyper param
         'seq_len': 2,
+        'tom_epoch': 100,
+        'beta_tom': 3.0,
         'tom_batch_size': 32,
         'bc_batch_size': 128,
         'bc_seq_len': 10,

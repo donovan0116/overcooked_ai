@@ -129,6 +129,8 @@ def main():
         # tom hyper param
         'seq_len': 2,
         'tom_batch_size': 32,
+        'tom_epoch': 100,
+        'beta_tom': 3.0,
         'bc_batch_size': 128,
         'bc_seq_len': 10,
         'bc_epoch': 10,

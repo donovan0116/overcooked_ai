@@ -91,7 +91,7 @@ class MLPToMNet(nn.Module):
         if len(x.size()) != 3:
             print("stop")
         batch_size, seq_len, input_size = x.size()
-        encoder_out = self.encoder(x.view(-1, input_size))
+        encoder_out = self.encoder(x[:, 1, :])
         mu = self.mu_layer(encoder_out)
         log_var = self.log_var_layer(encoder_out)
         std = torch.exp(0.5 * log_var)
@@ -318,8 +318,8 @@ def pre_process_dataset(dataset, batch_size):
 
 
 def train_tom_model(tom_model, dataset, param):
-    train_step1(tom_model, dataset, 64, 100)
-    train_step2(tom_model, dataset, 64, 100)
+    train_step1(tom_model, dataset, param.get("tom_batch_size"), epoch=param.get("tom_epoch"))
+    train_step2(tom_model, dataset, param.get("tom_batch_size"), epoch=param.get("tom_epoch"), beta=param.get("beta_tom"))
 
 
 if __name__ == '__main__':

@@ -83,6 +83,9 @@ if __name__ == "__main__":
         'bc_data_addr_train': "./human_data/2019_hh_trials_train.pt",
         'bc_data_addr_test': "./human_data/2019_hh_trials_test.pt",
         'seq_len': 10,
+        'tom_batch_size': 32,
+        'tom_epoch': 100,
+        'beta_tom': 3.0,
     }
 
     # print(os.getcwd())

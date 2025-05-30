@@ -183,10 +183,12 @@ def main():
         'target_reward': 180,
         'seq_len': 2,
         'tom_batch_size': 32,
+        'tom_epoch': 100,
+        'beta_tom': 3.0,
         # mep settings
         'pop_size': 5,
         'alpha': 0.01,
-        'beta_mep': 3,
+        'beta_mep': 1,
         'evaluate_times': 100,
         'bc_batch_size': 128,
         'bc_seq_len': 10,

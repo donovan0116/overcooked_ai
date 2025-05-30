@@ -144,7 +144,7 @@ def main():
         'target_reward': 180,
         # mep settings
         'pop_size': 5,
-        'alpha': 0.01,
+        'alpha': 0.001,
         'beta_mep': 1,
         'evaluate_times': 100,
         'bc_batch_size': 128,

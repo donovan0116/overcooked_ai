@@ -149,6 +149,8 @@ def main():
         # tom hyper param
         'seq_len': 2,
         'tom_batch_size': 32,
+        'tom_epoch': 100,
+        'beta_tom': 3.0,
     }
     param = ParameterManager(config)
 
@@ -179,7 +181,7 @@ def main():
     dataset = fake_dataset
 
     while True:
-        log_dir = get_run_log_dir('./logs/tensorboard_logs/ppo_16', 'generation')
+        log_dir = get_run_log_dir('../logs/tensorboard_logs/ppo_20', 'generation')
 
         writer = SummaryWriter(log_dir=log_dir)
 
